@@ -1,0 +1,15 @@
+[package]
+version = "0.1.0"
+title = "Orbit Demo"
+description = "prototype orbital mechanics: fixed sphere + orbiting cube (RK4)."
+authors = ["sangregoriokimpo - Gregory Jabido"]
+category = "Simulation"
+keywords = ["isaac-sim", "orbit", "demo"]
+
+# [dependencies]
+# "omni.usd" = {}
+# "omni.kit.app" = {}
+# "omni.timeline" = {}
+
+[[python.module]]
+name = "com.SLI.orbit"
