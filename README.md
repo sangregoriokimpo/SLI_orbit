@@ -10,6 +10,14 @@ A minimal Isaac Sim / Omniverse Kit extension that demonstrates **basic orbital 
 - NVIDIA Isaac Sim **5.1**
 - Ubuntu 24.04 LTS based distro
 
+## TO INSTALL
+
+Install into the home directory.
+
+```
+https://github.com/sangregoriokimpo/SLI_orbit.git
+```
+
 ## TO RUN:
 
 Simply add this as an extension to Isaac Sim
