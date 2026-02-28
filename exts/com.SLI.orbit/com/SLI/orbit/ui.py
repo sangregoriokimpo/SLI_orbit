@@ -54,13 +54,13 @@ class OUI:
                 ui.Label("Inclination i (deg)")
                 ui.FloatField(model=self._i_model)
 
-                ui.Label("RAAN Ω (deg)")
+                ui.Label("RAAN (Omega) (deg)")
                 ui.FloatField(model=self._raan_model)
 
-                ui.Label("Arg of Perigee ω (deg)")
+                ui.Label("Arg of Perigee (w) (deg)")
                 ui.FloatField(model=self._argp_model)
 
-                ui.Label("True Anomaly θ (deg)")
+                ui.Label("True Anomaly (Theta) (deg)")
                 ui.FloatField(model=self._nu_model)
                 self._plane_idx_model = self._plane_combo.model.get_item_value_model()
 
