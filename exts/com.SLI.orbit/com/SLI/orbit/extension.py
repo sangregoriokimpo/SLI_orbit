@@ -6,6 +6,8 @@ import omni.usd
 import omni.kit.app
 import omni.timeline
 from pxr import UsdGeom, Gf
+from .orbit_math import TBO, IC, COIC, C2RV
+from .ui import OUI
 
 class SLIOrbitExtension(omni.ext.IExt):
     #CONFIG
@@ -35,9 +37,14 @@ class SLIOrbitExtension(omni.ext.IExt):
         self._t_sphere = None
         self._t_cube = None
 
-        v_circ = math.sqrt(self.MU / self.R_ORBIT)
-        self._r = (self.R_ORBIT, 0.0, 0.0)
-        self._v = (0.0, v_circ, 0.0)
+        # v_circ = math.sqrt(self.MU / self.R_ORBIT)
+        # self._r = (self.R_ORBIT, 0.0, 0.0)
+        # self._v = (0.0, v_circ, 0.0)
+
+        self._orbit = TBO(mu = self.MU, center = self.CENTER)
+        self._clock = IC(dt_sim=self.DT_SIM)
+
+        self._r, self._v = COIC(self.MU, self.R_ORBIT, plane="xy")
 
         if self.AUTO_OPEN_USD:
             usd_path = self._packaged_usd_path(self.USD_FILENAME)
@@ -53,6 +60,8 @@ class SLIOrbitExtension(omni.ext.IExt):
 
         self._update_sub = self._app.get_update_event_stream().create_subscription_to_pop(self._on_update)
 
+        #INSTANTIATE ORBIT UI
+        self._ui = OUI(self)
         self._timeline.play()
 
         T= 2.0 * math.pi * math.sqrt((self.R_ORBIT ** 3) / self.MU)
@@ -68,6 +77,10 @@ class SLIOrbitExtension(omni.ext.IExt):
 
         self._t_sphere = None
         self._t_cube = None
+
+        if hasattr(self,"_ui") and self._ui:
+            self._ui.destroy()
+            self._ui = None
         print("[com.SLI.orbit] Shutdown.")
 
     def _on_stage_event(self,_evt):
@@ -122,54 +135,113 @@ class SLIOrbitExtension(omni.ext.IExt):
         
         #CUBE NOT PRESENT YET
         if self._t_cube is None:
-            return
-        dt = float(e.payload.get("dt",0.0))
-        if dt <= 0.0:
-            return
+            self._rebind_ops()
+            if self._t_cube is None:
+                return
+
+        # if self._t_cube is None:
+        #     return
+        # dt = float(e.payload.get("dt",0.0))
+        # if dt <= 0.0:
+        #     return
         
-        self._accum += dt 
-        while self._accum >= self.DT_SIM:
-            self._r, self._v = self._rk4_step(self._r, self._v, self.DT_SIM)
-            self._accum -= self.DT_SIM
-        try:
+        # self._accum += dt 
+        # while self._accum >= self.DT_SIM:
+        #     self._r, self._v = self._rk4_step(self._r, self._v, self.DT_SIM)
+        #     self._accum -= self.DT_SIM
+        # try:
+        #     self._t_cube.Set(Gf.Vec3d(*self._r))
+        # except Exception:
+        #     self._t_cube = None
+        #     self._rebind_ops()
+
+        dt_frame = float(e.payload.get("dt",0.0))
+        if dt_frame <= 0.0:
+            return
+        steps = self._clock.add_time(dt_frame)
+        for _ in range(steps):
+            self._r, self._v = self._orbit.rk4_step(self._r, self._v, self.DT_SIM)
+
+        try: 
             self._t_cube.Set(Gf.Vec3d(*self._r))
         except Exception:
             self._t_cube = None
             self._rebind_ops()
 
-    def _accel(self,pos):
-        dx = pos[0] - self.CENTER[0]
-        dy = pos[1] - self.CENTER[1]
-        dz = pos[2] - self.CENTER[2]
-        r2 = dx * dx + dy * dy + dz * dz
-        if r2 < 1e-12:
-            return (0.0,0.0,0.0)
-        r = math.sqrt(r2)
-        s = -self.MU / (r ** 3)
-        return (s * dx, s * dy, s* dz)
+    def apply_orbit_settings(self, mu: float, r_orbit: float, dt_sim: float, plane: str = "xy"):
+        # update config
+        self.MU = float(mu)
+        self.R_ORBIT = float(r_orbit)
+        self.DT_SIM = float(dt_sim)
+
+        # rebuild orbit objects + reset integrator state
+        self._orbit = TBO(mu=self.MU, center=self.CENTER)
+        self._clock = IC(dt_sim=self.DT_SIM)
+        self._r, self._v = COIC(self.MU, self.R_ORBIT, plane=plane)
+
+    def reset_orbit_settings(self):
+        # set your preferred defaults here
+        self.MU = 980.665
+        self.R_ORBIT = 25.0
+        self.DT_SIM = 1.0 / 120.0
+
+        self._orbit = TBO(mu=self.MU, center=self.CENTER)
+        self._clock = IC(dt_sim=self.DT_SIM)
+        self._r, self._v = COIC(self.MU, self.R_ORBIT, plane="xy")
+
+    def apply_elements(self,mu,a,e,inc_deg,raan_deg,argp_deg,nu_deg):
+        self.MU = float(mu)
+        self._orbit = TBO(mu=self.MU, center=self.CENTER)
+        self._clock = IC(dt_sim=self.DT_SIM)
+
+        inc = math.radians(float(inc_deg))
+        raan = math.radians(float(raan_deg))
+        argp= math.radians(float(argp_deg))
+        nu = math.radians(float(nu_deg))
+        print("EXT apply_elements plane-free state set:", self._r, self._v)
+        self._r, self._v = C2RV(self.MU, float(a), float(e), inc, raan, argp, nu)
+
+    '''
+    OLD ACCEL IMPLEMENTATION
+    '''
+
+    # def _accel(self,pos):
+    #     dx = pos[0] - self.CENTER[0]
+    #     dy = pos[1] - self.CENTER[1]
+    #     dz = pos[2] - self.CENTER[2]
+    #     r2 = dx * dx + dy * dy + dz * dz
+    #     if r2 < 1e-12:
+    #         return (0.0,0.0,0.0)
+    #     r = math.sqrt(r2)
+    #     s = -self.MU / (r ** 3)
+    #     return (s * dx, s * dy, s* dz)
     
-    def _rk4_step(self, r, v, dt):
-        def add(a,b):
-            return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
-        def mul(s,a):
-            return (s*a[0], s*a[1], s*a[2])
+    '''
+    OLD RK4 IMPLEMENTATION
+    '''
+    
+    # def _rk4_step(self, r, v, dt):
+    #     def add(a,b):
+    #         return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+    #     def mul(s,a):
+    #         return (s*a[0], s*a[1], s*a[2])
         
-        a1 = self._accel(r); k1r, k1v = v, a1
-        r2 = add(r,mul(0.5* dt,k1r))
-        v2 = add(v, mul(0.5 * dt, k1v))
-        a2 = self._accel(r2); k2r, k2v = v2, a2
+    #     a1 = self._accel(r); k1r, k1v = v, a1
+    #     r2 = add(r,mul(0.5* dt,k1r))
+    #     v2 = add(v, mul(0.5 * dt, k1v))
+    #     a2 = self._accel(r2); k2r, k2v = v2, a2
 
-        r3 = add(r, mul(0.5 * dt, k2r))
-        v3 = add(v, mul(0.5 * dt, k2v))
-        a3 = self._accel(r3); k3r, k3v = v3, a3
+    #     r3 = add(r, mul(0.5 * dt, k2r))
+    #     v3 = add(v, mul(0.5 * dt, k2v))
+    #     a3 = self._accel(r3); k3r, k3v = v3, a3
 
-        r4 = add(r, mul(dt, k3r))
-        v4 = add(v, mul(dt, k3v))
-        a4 = self._accel(r4); k4r, k4v = v4, a4
+    #     r4 = add(r, mul(dt, k3r))
+    #     v4 = add(v, mul(dt, k3v))
+    #     a4 = self._accel(r4); k4r, k4v = v4, a4
 
-        r_next = add(r, mul(dt / 6.0, add(add(k1r, mul(2.0, k2r)), add(mul(2.0, k3r), k4r))))
-        v_next = add(v, mul(dt / 6.0, add(add(k1v, mul(2.0, k2v)), add(mul(2.0, k3v), k4v))))
-        return r_next, v_next
+    #     r_next = add(r, mul(dt / 6.0, add(add(k1r, mul(2.0, k2r)), add(mul(2.0, k3r), k4r))))
+    #     v_next = add(v, mul(dt / 6.0, add(add(k1v, mul(2.0, k2v)), add(mul(2.0, k3v), k4v))))
+    #     return r_next, v_next
         
 
 
